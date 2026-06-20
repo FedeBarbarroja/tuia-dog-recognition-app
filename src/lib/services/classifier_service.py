@@ -27,32 +27,32 @@ logger = logging.getLogger(__name__)
 class _CustomCNN(nn.Module):
     """CNN propia para clasificacion de razas (Modelo B).
 
-    Arquitectura: 4 bloques Conv+BN+ReLU+MaxPool, AdaptiveAvgPool,
-    FC 256->512 (embeddings), FC 512->num_classes.
-    La capa de 512 dimensiones es equivalente a la penultima capa de ResNet18,
+    Arquitectura estilo VGG: 5 bloques con doble conv por bloque,
+    canales 3->64->128->256->512->512, AdaptiveAvgPool -> 512 dims.
+    La capa de 512 dimensiones equivale a la penultima capa de ResNet18,
     lo que permite usar extract_custom_embedding con ambos modelos.
     """
 
     def __init__(self, num_classes: int) -> None:
         super().__init__()
         self.features = nn.Sequential(
-            self._block(3, 32),
-            self._block(32, 64),
+            self._block(3, 64),
             self._block(64, 128),
             self._block(128, 256),
+            self._block(256, 512),
+            self._block(512, 512),
         )
         self.pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.embedding = nn.Sequential(
-            nn.Linear(256, 512),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.5),
-        )
+        self.dropout = nn.Dropout(0.5)
         self.classifier = nn.Linear(512, num_classes)
 
     @staticmethod
     def _block(in_ch: int, out_ch: int) -> nn.Sequential:
         return nn.Sequential(
             nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1),
             nn.BatchNorm2d(out_ch),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(2),
@@ -62,14 +62,13 @@ class _CustomCNN(nn.Module):
         x = self.features(x)
         x = self.pool(x)
         x = x.flatten(1)
-        x = self.embedding(x)
+        x = self.dropout(x)
         return self.classifier(x)
 
     def get_embedding(self, x: torch.Tensor) -> torch.Tensor:
         x = self.features(x)
         x = self.pool(x)
-        x = x.flatten(1)
-        return self.embedding(x)
+        return x.flatten(1)
 
 
 class ClassifierService:
